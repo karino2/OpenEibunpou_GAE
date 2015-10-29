@@ -20,3 +20,14 @@ indexes:
   - name: userId
   - name: year
   - name: date
+
+- kind: LikeDislike
+  properties:
+  - name: user
+  - name: year
+  - name: date
+
+- kind: UserPost
+  properties:
+  - name: year
+  - name: date

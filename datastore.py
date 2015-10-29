@@ -19,7 +19,6 @@ class Question(ndb.Model):
 	answer = ndb.StringProperty() # might be list, so I use String
 	questionType = ndb.IntegerProperty()
 
-
 class CompletionQuestion(ndb.Model):
 	userId = ndb.StringProperty() #email address
 	year = ndb.StringProperty()
@@ -32,6 +31,184 @@ class CompletionStage(ndb.Model):
 	year = ndb.StringProperty()
 	completion = ndb.IntegerProperty() #0-100
 	date = ndb.IntegerProperty()
+
+class UserPost(ndb.Model):
+    owner = ndb.StringProperty() #email
+    year = ndb.StringProperty()
+    subQuestionNumber = ndb.StringProperty()
+    anonymous = ndb.IntegerProperty() #0 or 1
+    parent = ndb.IntegerProperty()
+    childrenNum = ndb.IntegerProperty()
+    like = ndb.IntegerProperty()
+    dislike = ndb.IntegerProperty()
+    report = ndb.IntegerProperty()
+    body = ndb.StringProperty()
+    date = ndb.IntegerProperty() #posted tick
+
+class LikeDislike(ndb.Model):
+    postId = ndb.IntegerProperty()
+    year = ndb.StringProperty()
+    subQuestionNumber = ndb.StringProperty()
+    user = ndb.StringProperty() #email
+    val = ndb.IntegerProperty() #-1,0,1
+    date = ndb.IntegerProperty()
+
+# /likes/27-1/12345432
+class LikeDislikeListHandler(webapp2.RequestHandler):
+    def get(self, year, fromTickS):
+        user = users.get_current_user()
+        if not user:
+            self.redirect(users.create_login_url(self.request.uri))
+            return
+        fromTick = int(fromTickS)
+        likes = LikeDislike.query(ndb.AND(LikeDislike.user == user.email(), ndb.AND(LikeDislike.year == year, LikeDislike.date > fromTick)))
+        objs = map((lambda like: {"postId": like.postId, "val": like.val, "date": like.date} ), likes)
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.write(json.dumps(objs))
+
+# /like json: {"id": 1234567, "val": 1}
+class LikeDislikeHandler(webapp2.RequestHandler):
+    def post(self):
+        user = users.get_current_user()
+        if not user:
+            self.redirect(users.create_login_url(self.request.uri))
+            return
+        obj = json.loads(self.request.get('json'))
+        tick = getTickCount()
+        post = UserPost.get_by_id(obj['id'])
+        if post == None:
+            self.response.set_status(400)
+            self.response.write('Bad request. Specified post not found.')
+            return
+        likeDislikes = LikeDislike.query(ndb.AND(LikeDislike.postId == obj['id'], LikeDislike.user == user.email())).fetch(1)
+        newVal = obj['val']
+        deltaLike = 0
+        deltaDislike = 0
+        if len(likeDislikes) == 1:
+            like = likeDislikes[0]
+            if like.val == newVal:
+                # do nothing
+                self.response.headers['Content-Type'] = 'text/plain'
+                self.response.write("do nothing.")
+                return
+            oldVal = like.val
+            if oldVal == 1:
+                deltaLike = -1
+            elif oldVal == -1:
+                deltaDislike = -1
+            like.val = newVal
+            like.date = tick
+            like.put()
+        else:
+            like = LikeDislike(    
+                postId = obj['id'],
+                year = post.year,
+                subQuestionNumber = post.subQuestionNumber,
+                user = user.email(),
+                date = tick,
+                val = newVal)
+            like.put()
+            delta = newVal
+        if newVal == 1:
+            deltaLike += 1
+        elif newVal == -1:
+            deltaDislike += 1
+        # post.like and post.dislike is not exact number but just cache, so take care for illegal case.
+        post.like = max(0, post.like+deltaLike)
+        post.dislike = max(0, post.dislike+deltaDislike)
+        post.date = tick
+        post.put()
+        self.response.headers['Content-Type'] = 'text/plain'
+        self.response.write(tick)
+
+def buildJsonFromPostList(posts, userid):
+    res = []
+    for p in posts:
+        owner = p.owner
+        if p.anonymous and p.owner != userid:
+            owner = ""
+        obj = {
+            'id': p.key.id(),
+            'owner': owner,
+            'anonymous': p.anonymous,
+            'sub': p.subQuestionNumber,
+            'parent': p.parent,
+            'body': p.body,
+            'like': p.like,
+            'dislike': p.dislike,
+            'date': p.date
+            }
+        res.append(obj)
+    return res;
+
+# http://localhost:8080/posts/24-1/1234876
+class UserPostListHandler(webapp2.RequestHandler):
+    def get(self, year, fromTickS):
+        fromTick = int(fromTickS)
+        user = users.get_current_user()
+        if not user:
+            self.redirect(users.create_login_url(self.request.uri))
+            return
+        posts = UserPost.query(ndb.AND(UserPost.year == year, UserPost.date > fromTick))
+        self.response.headers['Content-Type'] = 'application/json'
+        self.response.write(json.dumps(buildJsonFromPostList(posts, user.email())))
+
+# cmd: 0 update, 1 delete
+# /pupdate json: {"id": 1234567, "cmd": 0, "anon": 0, "body": "hogehoge ikaika"}
+class UserPostUpdateHandler(webapp2.RequestHandler):
+    def post(self):
+        user = users.get_current_user()
+        if not user:
+            self.redirect(users.create_login_url(self.request.uri))
+            return
+        obj = json.loads(self.request.get('json'))
+        post = UserPost.get_by_id(obj['id'])
+        if post == None:
+            self.response.set_status(400)
+            self.response.write('Bad request. Specified post not found.')
+            return
+        if post.owner != user.email():
+            self.response.set_status(403)
+            self.response.write('Not a owner')
+            return
+        tick = getTickCount()
+        if obj['cmd'] == 1:
+            post.key.delete()
+        else:
+            post.anonymous = int(obj['anon'])
+            post.body = obj['body']
+            post.date = tick
+            post.put()
+        self.response.headers['Content-Type'] = 'text/plain'
+        self.response.write(tick)
+
+            
+
+# /post json: {"year": "27-1", "sub": "A-3", "anon": 0, "body": "hogehoge ikaika"}
+class UserPostHandler(webapp2.RequestHandler):
+    def post(self):
+        user = users.get_current_user()
+        if not user:
+            self.redirect(users.create_login_url(self.request.uri))
+            return
+        tick = getTickCount()
+        obj = json.loads(self.request.get('json'))
+        post = UserPost(
+            owner = user.email(),
+            year = obj['year'],
+            subQuestionNumber = obj['sub'],
+            anonymous = int(obj['anon']),
+            parent = 0,
+            like = 0,
+            dislike = 0,
+            report = 0,
+            body = obj['body'],
+            date = tick)
+        id = post.put()
+        self.response.headers['Content-Type'] = 'text/plain'
+        self.response.write(id)
+
+
 
 def buildJsonFromCompletionQuestionsForSpecificYear(completions):
 	res = []
@@ -53,7 +230,6 @@ def buildJsonFromCompletionQuestions(tick, completions):
 			}
 		lis.append(obj)
 	return { 'date': tick,  'comps': lis }
-
 
 # http://localhost:8080/compyear/24-1/1234876
 class StageQuestionCompletionHandler(webapp2.RequestHandler):
@@ -145,12 +321,14 @@ class MainPage(webapp2.RequestHandler):
                 self.response.out.write("""
                     <html>
             <body>
-              <form action="/cqupdate/27-1" method="post">
+              UserPost post.
+              <form action="/like" method="post">
                 <div><textarea name="json" rows="3" cols="60"></textarea></div>
                 <div><input type="submit" value="post"></div>
               </form>
-            </body>s
+            </body>
           </html>""")
+
 
 
 def buildJsonFromQuestions(questions):
@@ -221,6 +399,11 @@ app = webapp2.WSGIApplication([
 	(r'/compyear/(.*)/(.*)', StageQuestionCompletionHandler),
 	('/cqupdate', CompletionUpdateHandler),
 	(r'/complow/(.*)', LowestQuestionCompletionHandler),
+	(r'/posts/(.*)/(.*)', UserPostListHandler),
+	('/pupdate', UserPostUpdateHandler),
+	('/post', UserPostHandler),
+	(r'/likes/(.*)/(.*)', LikeDislikeListHandler),
+	('/like', LikeDislikeHandler),
 	('/save', SaveToLocalPage),
 	('/years', YearsHandler),
 ], debug=True)
