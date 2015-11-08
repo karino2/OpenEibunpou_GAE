@@ -141,17 +141,36 @@ def buildJsonFromPostList(posts, userid):
         res.append(obj)
     return res;
 
-# http://localhost:8080/posts/24-1/1234876
-class UserPostListHandler(webapp2.RequestHandler):
-    def get(self, year, fromTickS):
+class UserPostListBase(webapp2.RequestHandler):
+    def query(self):
+        pass
+    def baseGet(self, fromTickS):
         fromTick = int(fromTickS)
         user = users.get_current_user()
         if not user:
             self.redirect(users.create_login_url(self.request.uri))
             return
-        posts = UserPost.query(ndb.AND(UserPost.year == year, UserPost.date > fromTick))
+        self.fromTick = fromTick
+        self.user = user
+        posts = self.query()
         self.response.headers['Content-Type'] = 'application/json'
         self.response.write(json.dumps(buildJsonFromPostList(posts, user.email())))
+
+# http://localhost:8080/posts/24-1/1234876
+class UserPostListHandler(UserPostListBase):
+    def query(self):
+        return UserPost.query(ndb.AND(UserPost.year == self.year, UserPost.date > self.fromTick))
+    def get(self, year, fromTickS):
+        self.year = year
+        self.baseGet(fromTickS)
+
+# return latest 20
+# http://localhost:8080/nposts/1234876
+class UserPostLatestListHandler(UserPostListBase):
+    def query(self):
+        return UserPost.query(UserPost.date > self.fromTick).order(-UserPost.date).fetch(20)
+    def get(self, fromTickS):
+        self.baseGet(fromTickS)
 
 # cmd: 0 update, 1 delete
 # /pupdate json: {"id": 1234567, "cmd": 0, "anon": 0, "body": "hogehoge ikaika"}
@@ -331,6 +350,7 @@ class MainPage(webapp2.RequestHandler):
 
 
 
+
 def buildJsonFromQuestions(questions):
 	res =[]
 	for q in questions:
@@ -400,6 +420,7 @@ app = webapp2.WSGIApplication([
 	('/cqupdate', CompletionUpdateHandler),
 	(r'/complow/(.*)', LowestQuestionCompletionHandler),
 	(r'/posts/(.*)/(.*)', UserPostListHandler),
+	(r'/nposts/(.*)', UserPostLatestListHandler),
 	('/pupdate', UserPostUpdateHandler),
 	('/post', UserPostHandler),
 	(r'/likes/(.*)/(.*)', LikeDislikeListHandler),
