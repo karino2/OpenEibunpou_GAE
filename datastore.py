@@ -131,6 +131,7 @@ def buildJsonFromPostList(posts, userid):
             'id': p.key.id(),
             'owner': owner,
             'anonymous': p.anonymous,
+            'year': p.year,
             'sub': p.subQuestionNumber,
             'parent': p.parent,
             'body': p.body,
