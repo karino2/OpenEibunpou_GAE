@@ -44,6 +44,7 @@ class UserPost(ndb.Model):
     report = ndb.IntegerProperty()
     body = ndb.StringProperty()
     date = ndb.IntegerProperty() #posted tick
+    nick = ndb.StringProperty()
 
 class LikeDislike(ndb.Model):
     postId = ndb.IntegerProperty()
@@ -125,12 +126,15 @@ def buildJsonFromPostList(posts, userid):
     res = []
     for p in posts:
         owner = p.owner
-        if p.anonymous and p.owner != userid:
+        if p.owner != userid:
             owner = ""
+        nick = ""
+        if p.nick:
+            nick = p.nick
         obj = {
             'id': p.key.id(),
             'owner': owner,
-            'anonymous': p.anonymous,
+            'nick': nick,
             'year': p.year,
             'sub': p.subQuestionNumber,
             'parent': p.parent,
@@ -174,7 +178,7 @@ class UserPostLatestListHandler(UserPostListBase):
         self.baseGet(fromTickS)
 
 # cmd: 0 update, 1 delete
-# /pupdate json: {"id": 1234567, "cmd": 0, "anon": 0, "body": "hogehoge ikaika"}
+# /pupdate json: {"id": 1234567, "cmd": 0, nick:"nanasisan", "body": "hogehoge ikaika"}
 class UserPostUpdateHandler(webapp2.RequestHandler):
     def post(self):
         user = users.get_current_user()
@@ -195,8 +199,8 @@ class UserPostUpdateHandler(webapp2.RequestHandler):
         if obj['cmd'] == 1:
             post.key.delete()
         else:
-            post.anonymous = int(obj['anon'])
             post.body = obj['body']
+            post.nick = obj.get('nick',"")
             post.date = tick
             post.put()
         self.response.headers['Content-Type'] = 'text/plain'
@@ -204,7 +208,7 @@ class UserPostUpdateHandler(webapp2.RequestHandler):
 
             
 
-# /post json: {"year": "27-1", "sub": "A-3", "anon": 0, "body": "hogehoge ikaika"}
+# /post json: {"year": "27-1", "sub": "A-3", ""body": "hogehoge ikaika"}
 class UserPostHandler(webapp2.RequestHandler):
     def post(self):
         user = users.get_current_user()
@@ -217,12 +221,12 @@ class UserPostHandler(webapp2.RequestHandler):
             owner = user.email(),
             year = obj['year'],
             subQuestionNumber = obj['sub'],
-            anonymous = int(obj['anon']),
             parent = 0,
             like = 0,
             dislike = 0,
             report = 0,
             body = obj['body'],
+            nick = obj.get('nick', ''),
             date = tick)
         id = post.put()
         self.response.headers['Content-Type'] = 'text/plain'
